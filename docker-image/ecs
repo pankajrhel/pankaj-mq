@@ -1,0 +1,81 @@
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ServiceToken: !Ref 'TaskDefinitionServiceToken'
+      Family: !Ref 'AWS::StackName'
+      Volumes:
+      - Host:
+          SourcePath: /var/lib/rabbitmq-asg-autocluster
+        Name: rabbitmq-database
+      # important for rabbit node discovery as containers inherit the host's hostname that is in DNS 
+      NetworkMode: 'host'
+      ContainerDefinitions:
+      - Name: rabbit
+        Image: 379991499029.dkr.ecr.us-east-1.amazonaws.com/pankaj/rabbitmq-asg-autocluster:latest
+        MountPoints:
+        - SourceVolume: rabbitmq-database
+          ContainerPath: /var/lib/rabbitmq
+        Cpu: '512'
+        Memory: !Ref 'RabbitHardMemoryLimit'
+        MemoryReservation: !Ref 'RabbitSoftMemoryLimit'
+        PortMappings:
+        - HostPort: 5672
+          ContainerPort: 5672
+          Protocol: tcp
+        - HostPort: !Ref 15672
+          ContainerPort: 15672
+          Protocol: tcp
+        - HostPort: 4369
+          ContainerPort: 4369
+          Protocol: tcp
+        - HostPort: 25672
+          ContainerPort: 25672
+          Protocol: tcp
+        Environment:
+        - Name: RABBITMQ_DEFAULT_VHOST
+          Value: !Ref 'QueueVHost'
+        - Name: RABBITMQ_DEFAULT_USER
+          Value: !Ref 'QueueUser'
+        - Name: RABBITMQ_DEFAULT_PASS
+          Value: !Ref 'QueuePass'
+        - Name: RABBITMQ_DEFAULT_PORT
+          Value: 5672
+        - Name: RABBITMQ_VM_MEMORY_HIGH_WATERMARK
+          Value: 0.85
+        - Name: AWS_DEFAULT_REGION
+          Value: !Ref 'AWS::Region'
+        - Name: AWS_ASG_AUTOCLUSTER
+          Value: 'true'
+        # using a random erlang cookie
+        - Name: RABBITMQ_ERLANG_COOKIE
+          Value: 'ALWEDHDBZTQYWTJGTXWV'
+        - Name: RABBITMQ_QUEUE_MASTER_LOCATOR
+          Value: min-masters       
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref 'RabbitAutoClusterLogGroup'
+            awslogs-region: !Ref 'AWS::Region'
+            awslogs-stream-prefix: logs
+        ReadonlyRootFilesystem: 'false'
+        Privileged: 'true'
+        Ulimits:
+        - Name: nofile
+          SoftLimit: 10240
+          HardLimit: 32768
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceToken: !Ref 'ServiceDefinitionServiceToken'
+      ServiceName: !Ref 'AWS::StackName'
+      Cluster: !Ref 'Cluster'
+      DesiredCount: 3
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 66
+      TaskDefinition: !Ref 'TaskDefinition'
+      PlacementConstraints:
+      - Type: distinctInstance
+      PlacementStrategy:
+      - type: spread
+        field: attribute:ecs.availability-zone
